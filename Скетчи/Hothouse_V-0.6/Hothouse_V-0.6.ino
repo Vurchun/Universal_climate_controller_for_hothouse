@@ -182,6 +182,7 @@ void setup()
   rservo.attach(0);
   lservo.attach(2);
   myPID.SetMode(AUTOMATIC);
+  setSyncProvider(RTC.get);  
   Serial.println();
    
   Serial.print("Connecting to ");
