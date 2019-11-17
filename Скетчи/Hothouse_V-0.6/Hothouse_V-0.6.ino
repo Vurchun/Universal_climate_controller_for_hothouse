@@ -1,8 +1,6 @@
 #include <OneWire.h>
 #include <DS1307new.h>
 #include <GyverEncoder.h>
-#include <Wire.h>
-#include <SPI.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
 #include <Servo.h>
@@ -19,15 +17,16 @@
 #include <PID_v1.h>
 #include <ArduinoJson.h>
 #include <MQTT.h>
-#include <ESP8266WiFi.h>
-#include <Adafruit_ESP8266.h>
 #include <PubSubClient.h>
-#include <Adafruit_ESP8266.h>
+#include <PubSubClient_JSON.h>
+#include <ESP8266WiFi.h>
 #include <stdlib.h>
 #include <Time.h>
 #include <TimeLib.h>
 #include <sunMoon.h>
 #include <Wire.h>
+#include <Adafruit_ADS1015.h>
+
 
 // You should get Auth Token in the Blynk App.
 // Go to the Project Settings (nut icon).
@@ -60,17 +59,18 @@ int IfBankSave  = 0;
 Servo rservo;
 Servo lservo;
 
-LiquidCrystal_I2C lcd(0x27,3, POSITIVE);  //LiquidCrystal lcd(11, 10, 9, 8, 7, 6);   инициализация входов на дисплей 20*4
+LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);  //LiquidCrystal lcd(11, 10, 9, 8, 7, 6);   инициализация входов на дисплей 
 
 WiFiClient wclient; // Use WiFi_funkClient class to create TCP connections
 PubSubClient client(wclient, mqtt_server, mqtt_port);
 
 Adafruit_BME280 bme;
 
+Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 
 // Must declare output stream before Adafruit_ESP8266 constructor; can be
 // a SoftwareSerial stream, or Serial/Serial1/etc. for UART.
-Encoder Enc(15, 13, 12, TYPE2);                     // CLK, DT, SW, тип (TYPE1 / TYPE2): TYPE1 одношаговый, TYPE2 двухшаговый. Если ваш энкодер работает странно, смените тип
+Encoder Enc(13, 15, 12, TYPE2);                     // CLK, DT, SW, тип (TYPE1 / TYPE2): TYPE1 одношаговый, TYPE2 двухшаговый. Если ваш энкодер работает странно, смените тип
 int BS, BL, BankSave;                                                 // Переменые для сохранения настроек 
 double Temp = 37.7, deltaT = 0.2;               // температура выращивания, дельта Т
 #define maxdeltaT 2                                        // максимальное значение дельтаТ для меню
@@ -114,8 +114,8 @@ int winddeg;                   // достаем направление ветр
 
 
 int i = 0; int k = 0;
-double Tnow;                                                          // Реальная температура на данный момент в инкубаторе на DS18b20
-int hum;                                                              // Реальная влажность на данный момент в инкубаторе на BME280
+double Tnow;                                                          // Реальная температура на данный момент в теплице на BME280
+int hum;                                                              // Реальная влажность на данный момент в теплице на BME280
 int TypeHouse = 1;
 int VarHouse[3] ={0,1,2};
 int MainMenu = 0, SubMenu = 0, FlagMenu = 0;                          // переменные для управления меню
@@ -172,7 +172,6 @@ unsigned long int TimeIntervalFaning;                                          /
 unsigned long int TimeFaningInterval = TimeFanWork * 1000;                 //длительность работы вентилятора при продувке теплицы от СО2 
 unsigned long int TimeIntervalFaningInterval = TimeIntervalFanWork * 60000;//длительность интервала между продувками теплицы от СО2
 
-
 void setup()
 {
   lcd.begin(20, 4);
@@ -180,6 +179,8 @@ void setup()
   Serial.begin(115200);             // Запускаем вывод данных на серийный порт 
   Wire.begin(SDA_PIN, SCL_PIN);
   
+  ads.begin();
+
   rservo.attach(0);
   lservo.attach(2);
   myPID.SetMode(AUTOMATIC);
@@ -280,7 +281,7 @@ void SaveToEEPROM(int BankSave)                                                 
   BS = BankSave * 20 + 3;     EEPROM.write(BS, higtByte);                 delay(100);    // запись higtByte дельтаТ температуры выращивания * 100 в ячейку "3" банка "bank"
   BS = BankSave * 20 + 4;     EEPROM.write(BS, Humiditi);       delay(100);    // запись дельты влажности выращивания в ячейку "4" банка "bank"
   BS = BankSave * 20 + 5;     EEPROM.write(BS, deltaHumiditi);  delay(100);    // запись дельты влажности выращивания в ячейку "5" банка "bank"
-                                                                                // запись времени через которое происходит переворот яиц в ячейку "6" банка "bank"
+                                                                                
   int TICc = int(maxTempFanStart * 100); lowByte = ((TICc >> 0) & 0xFF); higtByte = ((TICc >> 8) & 0xFF);
   BS = BankSave * 20 + 7;     EEPROM.write(BS, lowByte);                  delay(100);    // запись lowByte температуры продувки * 100 в ячейку "7" банка "bank"
   BS = BankSave * 20 + 8;     EEPROM.write(BS, higtByte);                 delay(100);    // запись higtByte температуры продувки * 100 в ячейку "8" банка "bank"
@@ -304,14 +305,14 @@ void LoadFromEEPROM(int BankLoad)                                               
   deltaT = (((lowByte << 0) & 0xFF) + ((higtByte << 8) & 0xFF00)) / 100.00;
   BL = BankLoad * 20 + 4;     Humiditi = EEPROM.read(BL);       delay(100);    // чтение дельты влажности выращивания из ячейки "4"
   BL = BankLoad * 20 + 5;     deltaHumiditi = EEPROM.read(BL);  delay(100);    // чтение дельты влажности выращивания из ячейки "5"
-                                                                                            // чтение времени через которое происходит переворот яиц из ячейки "6"
+                                                                                          
   BL = BankLoad * 20 + 7;     lowByte = EEPROM.read(BL);                 delay(100);    // чтение lowByte температуры продувки *100 из ячейки "7"
   BL = BankLoad * 20 + 8;     higtByte = EEPROM.read(BL);                 delay(100);    // чтение higtByte температуры продувки *100 из ячейки "8"
   maxTempFanStart = (((lowByte << 0) & 0xFF) + ((higtByte << 8) & 0xFF00)) / 100.00;
   BL = BankLoad * 20 + 9;     lowByte = EEPROM.read(BL);  delay(100);                   // чтение lowByte времени вентиляции теплицы от СО2 из ячейки "9"
   BL = BankLoad * 20 + 10;    higtByte = EEPROM.read(BL);  delay(100);                   // чтение higtByte времени вентиляции теплицы от СО2 из ячейки "10"
   TimeFanWork = ((lowByte << 0) & 0xFF) + ((higtByte << 8) & 0xFF00);
-  BL = BankLoad * 20 + 11;    lowByte = EEPROM.read(BL); delay(100);                    // чтение lowByte интервала между вентиляциями теплицы от СО2 из ячейки "11"
+  BL = BankLoad * 20  + 11;    lowByte = EEPROM.read(BL); delay(100);                    // чтение lowByte интервала между вентиляциями теплицы от СО2 из ячейки "11"
   BL = BankLoad * 20 + 12;    higtByte = EEPROM.read(BL); delay(100);                    // чтение higtByte интервала между вентиляциями теплицы от СО2 из ячейки "12"
   TimeIntervalFanWork = ((lowByte << 0) & 0xFF) + ((higtByte << 8) & 0xFF00);
   BL = BankLoad * 20 + 13;    FanWorkFlag = EEPROM.read(BL); delay(100);                 // чтение флага активностивентиляциями теплицы от СО2 из ячейки "13"
@@ -324,16 +325,19 @@ void LoadFromEEPROM(int BankLoad)                                               
 
 void PressKeyMenu()                                                                      // Вычиление нажатия кнопок  
 {
+  delay(50);
+  
   PressingButtons = 0;
-   Enc.tick();
- 
-        if (Enc.isHolded())  PressingButtons = 1;          // меню     //при удержании кнопки  
-  else  if (Enc.isRight() )  PressingButtons = 2;          // вверх    //при повороте направо
-  else  if (Enc.isRight() )  PressingButtons = 3;          // вниз     //при повороте налево 
-  else  if (Enc.isClick() )  PressingButtons = 4;          // выбор    //при нажатии и отпускании кнопки  
-  else  if (Enc.isFastR() || Enc.isFastL())  PressingButtons = 5;          // переворот    //при быстром повороте     
+
+  buttons_Menu = ads.readADC_SingleEnded(0);
+  Serial.print("  Resistant key button module="); Serial.print(buttons_Menu); Serial.println(" ");
+        if (buttons_Menu >= 60000 )  PressingButtons = 1;           // меню       
+  else  if (buttons_Menu > 10000 && buttons_Menu < 13000) PressingButtons = 2;     // вверх       
+  else  if (buttons_Menu > 3000 && buttons_Menu < 7000) PressingButtons = 3;     // вниз      
+  else  if ( buttons_Menu > 15000 && buttons_Menu < 17000)PressingButtons = 4;      // выбор      
+  else  if (buttons_Menu > 800 && buttons_Menu < 900) PressingButtons = 5;  // открития окон       
   else  PressingButtons = 0; 
-  Serial.print("  Button key =");Serial.print(PressingButtons); Serial.println(" ");delay(100);           
+ Serial.print("  Button key =");Serial.print(PressingButtons); Serial.println(" ");delay(50);           
 }
 
 void PreSetTime()
@@ -469,7 +473,7 @@ void BME280Read()                                                     // Чте�
   if (currentMillis - BME280readMillis > BME280interval)
   {
     BME280readMillis = currentMillis;
-    Temp = bme.readTemperature();
+    Tnow = bme.readTemperature();
     Press = bme.readPressure() / 100.0F;  
     hum = bme.readHumidity();
  }
@@ -479,7 +483,7 @@ void SoilMoistureRead(){
   {
   I2CGroundreadMillis = currentMillis;
   digitalWrite(PinHumGroundControl, HIGH);   
-  HumGroundnow = analogRead(PinHumGround);
+  HumGroundnow = ads.readADC_SingleEnded(2);
   HumGroundnow = map(HumGroundnow, 0, 1000, 0, 100);  // адаптируем значения от 0 до 100,
  
   digitalWrite(PinHumGroundControl, LOW);   
@@ -590,15 +594,19 @@ void callback(const MQTT::Publish& pub) {
     pub.payload_stream()->stop();
     Serial.println("");
   } else
-  if(String(pub.topic()) == "Hothouse/ControlHum") { Humiditi = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
-  if(String(pub.topic()) == "Hothouse/ControlTemp") { Temp = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
+  if(String(pub.topic()) == "Hothouse/ControlHum")                   { Humiditi = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
+  if(String(pub.topic()) == "Hothouse/ControlTemp")                  { Temp = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
   if(String(pub.topic()) == "Hothouse/TimeIntervalFanWorkntrolTemp") { TimeIntervalFanWork = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
-  if(String(pub.topic()) == "Hothouse/TimeFanWork") { TimeFanWork = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer 
-  if(String(pub.topic()) == "Hothouse/maxTempFanStart") { maxTempFanStart = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
-  if(String(pub.topic()) == "Hothouse/deltaT") { deltaT = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
-  if(String(pub.topic()) == "Hothouse/deltaHumiditi") { deltaHumiditi = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
-  if(String(pub.topic()) == "Hothouse/NumBankSave") { NumBankSave = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
-  if(String(pub.topic()) == "Hothouse/IfBankSave") { IfBankSave = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
+  if(String(pub.topic()) == "Hothouse/TimeFanWork")                  { TimeFanWork = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer 
+  if(String(pub.topic()) == "Hothouse/maxTempFanStart")              { maxTempFanStart = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
+  if(String(pub.topic()) == "Hothouse/deltaT")                       { deltaT = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
+  if(String(pub.topic()) == "Hothouse/deltaHumiditi")                { deltaHumiditi = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
+  if(String(pub.topic()) == "Hothouse/NumBankSave")                  { NumBankSave = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
+  if(String(pub.topic()) == "Hothouse/IfBankSave")                   { IfBankSave = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
+  if(String(pub.topic()) == "Hothouse/BankSave")                     { BankSave = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
+  if(String(pub.topic()) == "Hothouse/ConstP")                       { BankSave = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
+  if(String(pub.topic()) == "Hothouse/ConstI")                       { BankSave = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
+  if(String(pub.topic()) == "Hothouse/ConstD")                       { BankSave = pub.payload_string().toInt(); }// проверяем из нужного ли нам топика пришли данные // преобразуем полученные данные в тип integer
 
 }
 
@@ -625,53 +633,68 @@ void jsonGet() {
  
 void WiFi_funk() 
 {
-  voltage = analogRead(17) * 5.72 / 1024 * 4.575;     //подщёт заряда аккумулятора
+  voltage = ads.readADC_SingleEnded(1) * 0.185 / 1000 * 5.75;     //подсчет заряда аккумулятора
   if( voltage > 13.5 ) netpower = 1;
   else netpower = 0;
-  delay(150);
+  delay(10);
+  int i = 0;
+    while (i<10){
     lcd.setCursor(18, 3); lcd.print("\8");           //Отправка значений на сервер    
-      Serial.println("Start");
-  client.publish("Hothouse/Temp",String(Tnow));Serial.println("Tnow = ");Serial.println(Tnow);
-  client.publish("Hothouse/ControlTemp",String(Temp));Serial.println("ControlTemp = ");Serial.println(Temp);
-  client.publish("Hothouse/Hum",String(hum));Serial.println("HumiditiNow = ");Serial.println(hum);
-  client.publish("Hothouse/ControlHum",String(Humiditi));Serial.println("ControlHum = ");Serial.println(Humiditi);
-  client.publish("Hothouse/Power",String(voltage));Serial.println("Voltage = ");Serial.println(voltage);
-  client.publish("Hothouse/NetPower",String(netpower));Serial.println("NetPower = ");Serial.println(netpower);
-    Serial.println("Finish");
-    Serial.println("");
+    delay(100);i++;
+    }
+    while (!client.connect(MQTT::Connect(mqtt_id).set_auth(mqtt_user, mqtt_pass))) {
+    Serial.print(".");
+    delay(1000);
+  } 
+  Serial.println("Connected to MQTT server");   
+   
+    lcd.setCursor(18, 3); lcd.print("\8");           //Отправка значений на сервер    
+      Serial.println("Start");delay(50);
+  client.publish("Hothouse/Temp",String(Tnow));           Serial.println("Tnow = ");        Serial.println(Tnow);delay(50);
+  client.publish("Hothouse/ControlTemp",String(Temp));    Serial.println("ControlTemp = "); Serial.println(Temp);delay(50);
+  client.publish("Hothouse/deltaT",String(deltaT));       Serial.println("deltaT = "); Serial.println(deltaT);  delay(50);
+  client.publish("Hothouse/Hum",String(hum));             Serial.println("HumiditiNow = "); Serial.println(hum);delay(50);
+  client.publish("Hothouse/ControlHum",String(Humiditi)); Serial.println("ControlHum = ");  Serial.println(Humiditi);delay(50);
+  client.publish("Hothouse/deltaHumiditi",String(deltaHumiditi));    Serial.println("deltaHumiditi = "); Serial.println(deltaHumiditi);delay(50);
+  client.publish("Hothouse/Power",String(voltage));       Serial.println("Voltage = ");     Serial.println(voltage);delay(50);
+  client.publish("Hothouse/NetPower",String(netpower));   Serial.println("NetPower = ");    Serial.println(netpower);delay(50);
+  client.publish("Hothouse/ConstP",String(consKp));       Serial.println("ConstP = "); Serial.println(consKp);delay(50);
+  client.publish("Hothouse/ConstI",String(consKi));       Serial.println("ConstI = "); Serial.println(consKi);delay(50);
+  client.publish("Hothouse/ConstD",String(consKd));      Serial.println("ConstD = "); Serial.println(consKd);delay(250);
+  client.subscribe("Hothouse/NumBankSave");               client.set_callback(callback);// подписывааемся по топик с данными для банка загрузки 
+  
+     Serial.println("Finish");
+     Serial.println("");
  
     if(IfBankSave == 1){
     IfBankSave = 0;
-    SaveToEEPROM(NumBankSave);
-    
-  while (!client.connect(MQTT::Connect("arduinoClient")
-       .set_auth(mqtt_user, mqtt_pass))) {
-    Serial.print(".");
-    delay(100);
-      } 
-    
-   Serial.println("Connected to MQTT server");
-    client.subscribe("Hothouse/deltaHumiditi");client.set_callback(callback); // подписывааемся по топик с данными для светодиода 
-    client.subscribe("Hothouse/deltaT"); client.set_callback(callback);// подписывааемся по топик с данными для дельты температуры   
-    client.subscribe("Hothouse/maxTempFanStart"); client.set_callback(callback);// подписывааемся по топик с данными для критичной температуры   
-    client.subscribe("Hothouse/TimeFanWork"); client.set_callback(callback);// подписывааемся по топик с данными для работы вентилятора   
-    client.subscribe("Hothouse/TimeIntervalFanWork "); client.set_callback(callback);// подписывааемся по топик с данными для периода вентилятора  
-    client.subscribe("Hothouse/ControlHum"); client.set_callback(callback);// подписывааемся по топик с данными для заданной температуры
-    client.subscribe("Hothouse/ControlTemp"); client.set_callback(callback);// подписывааемся по топик с данными для заданной влажности 
-    client.subscribe("Hothouse/IfBankSave"); client.set_callback(callback);// подписывааемся по топик с данными для подтверждения перезагрузки  
-    client.subscribe("Hothouse/NumBankSave"); client.set_callback(callback);// подписывааемся по топик с данными для банка загрузки 
-   Serial.println("");
+    while(BankSave<1){
+    if(BankSave == 1){SaveToEEPROM(NumBankSave);break;}
+    Serial.println("");
+  client.subscribe("Hothouse/deltaHumiditi");client.set_callback(callback); // подписывааемся по топик с данными для светодиода 
+  client.subscribe("Hothouse/deltaT"); client.set_callback(callback);// подписывааемся по топик с данными для дельты температуры   
+  client.subscribe("Hothouse/maxTempFanStart"); client.set_callback(callback);// подписывааемся по топик с данными для критичной температуры   
+  client.subscribe("Hothouse/TimeFanWork"); client.set_callback(callback);// подписывааемся по топик с данными для работы вентилятора   
+  client.subscribe("Hothouse/TimeIntervalFanWork "); client.set_callback(callback);// подписывааемся по топик с данными для периода вентилятора  
+  client.subscribe("Hothouse/ControlHum"); client.set_callback(callback);// подписывааемся по топик с данными для заданной температуры
+  client.subscribe("Hothouse/ControlTemp"); client.set_callback(callback);// подписывааемся по топик с данными для заданной влажности 
+  client.subscribe("Hothouse/BankSave"); client.set_callback(callback);// подписывааемся по топик с данными для банка загрузки 
+  client.subscribe("Hothouse/IfBankSave"); client.set_callback(callback);// подписывааемся по топик с данными для подтверждения перезагрузки  
+  client.subscribe("Hothouse/ConstP"); client.set_callback(callback);// подписывааемся по топик с данными для подтверждения перезагрузки  
+  client.subscribe("Hothouse/ConstI"); client.set_callback(callback);// подписывааемся по топик с данными для подтверждения перезагрузки  
+  client.subscribe("Hothouse/ConstD"); client.set_callback(callback);// подписывааемся по топик с данными для подтверждения перезагрузки  
+    Serial.println("");
 
 
     }
-
+    }
 jsonGet();
      StaticJsonBuffer<2000> jsonBuffer;                   /// буфер на 2000 символов
-   JsonObject& root = jsonBuffer.parseObject(line);     // скармиваем String
+   JsonObject& root = jsonBuffer.parseObject(line);     // Обрабатываем String
    if (!root.success()) {
     Serial.println("parseObject() failed");             // если ошибка, сообщаем об этом
-     jsonGet();                                         // пинаем сервер еще раз
-    return;                                             // и запускаем заного 
+     jsonGet();                                         // опрашиваем сервер еще раз
+    return;                                             // и запускаем заново 
   }                    
   
   tempK = root["main"]["temp"];                   // достаем температуру из структуры main
@@ -692,6 +715,7 @@ jsonGet();
 
 void loop()
 { 
+
   PressingButtons = 0;
   currentMillis = millis();
    RTC.getTime(); 
@@ -842,7 +866,7 @@ case 1: {                                                                       
         }
       }
       break; }
-    case 5: {                                                                                                        // обработка события нажатия кнопки "ПЕРЕВОРОТ"
+    case 5: {                                                                                                        // обработка события нажатия кнопки "Открытие окон"
       StartFan();
       break; }
     }
@@ -914,30 +938,30 @@ case 1: {                                                                       
  
  
   switch (m) {
-  case 0: {  /*BME280Read();*/ StartFan();StartHot();StartLite();StartHum(); TimerCalculatePrint();WiFi_funk();
-             lcd.clear();lcd.setCursor(0, 0);  lcd.print("T="); lcd.print(Tnow); lcd.print("\3 (");lcd.print(Temp);    lcd.print("\3)");  
+  case 0: {  lcd.clear();lcd.setCursor(0, 0);  lcd.print("T="); lcd.print(Tnow); lcd.print("\3 (");lcd.print(Temp);    lcd.print("\3)");  
              lcd.setCursor(0, 1);  lcd.print("H="); lcd.print(hum);  lcd.print("%("); lcd.print(Humiditi); lcd.print("%)");
              lcd.setCursor(0, 2);if( voltage >= 13.5 ){lcd.print("220V - ON"); }else{ lcd.print("Bat="); lcd.print(voltage);}
              lcd.setCursor(0, 3);
-             if (RTC.hour < 10) lcd.print(0); lcd.print(RTC.hour); lcd.print(":"); if (RTC.minute < 10) lcd.print(0); lcd.print(RTC.minute); lcd.print(":"); if (RTC.second < 10) lcd.print(0); lcd.print(RTC.second);                                                             FlagMenu = 0;   break; }
-  case 10: {  lcd.clear(); lcd.setCursor(0, 1); lcd.print(F("    Setting     ")); lcd.setCursor(0, 2); lcd.print(F("   incubation   ")); lcd.setCursor(15, 1);           lcd.print("\1                ");                                                               delay(100);FlagMenu = 0;   break; }
-  case 11: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("Temperature inc ")); lcd.setCursor(0, 1); lcd.print(F("t =             ")); lcd.print(Temp);                lcd.print("\3                ");             PrintMenuWrite(FlagMenu);                         delay(100);                break; }
-  case 12: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("    Delta T     ")); lcd.setCursor(0, 1); lcd.print(F("\4t =           ")); lcd.print(deltaT);              lcd.print("\3                ");             PrintMenuWrite(FlagMenu);                         delay(100);                break; }
-  case 13: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("   Humiditi     ")); lcd.setCursor(0, 1); lcd.print(F("H =             ")); lcd.print(Humiditi);            lcd.print("%                 ");             PrintMenuWrite(FlagMenu);                         delay(100);                break; }
-  case 14: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("    Delta H     ")); lcd.setCursor(0, 1); lcd.print(F("\4h =           ")); lcd.print(deltaHumiditi);       lcd.print("%                 ");             PrintMenuWrite(FlagMenu);                         delay(100);                break; }
-  case 15: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("  Type HotHouse ")); lcd.setCursor(0, 1); lcd.print(F("Type = ")); TypeHousePrint();          lcd.print("                  ");             PrintMenuWrite(FlagMenu);                         delay(100);                break; } 
-  case 20: {  lcd.clear(); lcd.setCursor(0, 1); lcd.print(F("  Save setting  ")); lcd.setCursor(0, 2); lcd.print(F("   to  EEPROM   ")); lcd.setCursor(15, 1);           lcd.print("\1                ");                                                               delay(100); FlagMenu = 0;  break; }
-  case 21: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("Save setting to ")); lcd.setCursor(0, 1); lcd.print(F("bank ")); lcd.print(bank); if (FlagMenu == 0) {      lcd.print(" press set"); delay(100); } else { SaveToEEPROM(bank);   lcd.print(" saving...");   delay(100); }              break; }
-  case 30: {  lcd.clear(); lcd.setCursor(0, 1); lcd.print(F("  Load setting  ")); lcd.setCursor(0, 2); lcd.print(F("  from  EEPROM  ")); lcd.setCursor(15, 1);           lcd.print("\1                ");                                                               delay(100); FlagMenu = 0;  break; }
+             if (RTC.hour < 10) lcd.print(0); lcd.print(RTC.hour); lcd.print(":"); if (RTC.minute < 10) lcd.print(0); lcd.print(RTC.minute); lcd.print(":"); if (RTC.second < 10) lcd.print(0); lcd.print(RTC.second);       
+              BME280Read(); StartFan();StartHot();StartLite();StartHum(); TimerCalculatePrint();WiFi_funk();                                                                                                                                                                   FlagMenu = 0;   break; }
+  case 10: {  lcd.clear(); lcd.setCursor(0, 1); lcd.print(F("    Setting     ")); lcd.setCursor(0, 2); lcd.print(F("   Growing  ")); lcd.setCursor(15, 1);           lcd.print("\1                ");                                                               delay(100);FlagMenu = 0;   break; }
+  case 11: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("   Temperature  ")); lcd.setCursor(0, 1); lcd.print(F("t =         ")); lcd.print(Temp);                lcd.print("\3                ");             PrintMenuWrite(FlagMenu);                         delay(100);                break; }
+  case 12: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("    Delta T     ")); lcd.setCursor(0, 1); lcd.print(F("\4t =       ")); lcd.print(deltaT);              lcd.print("\3                ");             PrintMenuWrite(FlagMenu);                         delay(100);                break; }
+  case 13: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("   Humiditi     ")); lcd.setCursor(0, 1); lcd.print(F("H =         ")); lcd.print(Humiditi);            lcd.print("%                 ");             PrintMenuWrite(FlagMenu);                         delay(100);                break; }
+  case 14: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("    Delta H     ")); lcd.setCursor(0, 1); lcd.print(F("\4h =       ")); lcd.print(deltaHumiditi);       lcd.print("%                 ");             PrintMenuWrite(FlagMenu);                         delay(100);                break; }
+  case 15: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("  Type HotHouse ")); lcd.setCursor(0, 1); lcd.print(F("Type =      ")); TypeHousePrint();               lcd.print("                  ");             PrintMenuWrite(FlagMenu);                         delay(100);                break; } 
+  case 20: {  lcd.clear(); lcd.setCursor(0, 1); lcd.print(F("  Save setting  ")); lcd.setCursor(0, 2); lcd.print(F("  to  EEPROM")); lcd.setCursor(15, 1);           lcd.print("\1                ");                                                               delay(100); FlagMenu = 0;  break; }
+  case 21: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("Save setting to ")); lcd.setCursor(0, 1); lcd.print(F("bank        ")); lcd.print(bank); if (FlagMenu == 0) {      lcd.print(" press set"); delay(100); } else { SaveToEEPROM(bank);   lcd.print(" saving...");   delay(100); }              break; }
+  case 30: {  lcd.clear(); lcd.setCursor(0, 1); lcd.print(F("  Load setting  ")); lcd.setCursor(0, 2); lcd.print(F("from  EEPROM")); lcd.setCursor(15, 1);           lcd.print("\1                ");                                                               delay(100); FlagMenu = 0;  break; }
   case 31: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("  Load setting  ")); lcd.setCursor(0, 1); lcd.print(F("bank ")); lcd.print(bank); if (FlagMenu == 0) {      lcd.print(" press set"); delay(100); } else { LoadFromEEPROM(bank); lcd.print(" loading..");   delay(100); }              break; }
-  case 40: {  lcd.clear(); lcd.setCursor(0, 1); lcd.print(F("      Time      ")); lcd.setCursor(0, 2); lcd.print(F("     setting    ")); lcd.setCursor(15, 1);           lcd.print("\1                ");                                                               delay(100); FlagMenu = 0;  break; }
+  case 40: {  lcd.clear(); lcd.setCursor(0, 1); lcd.print(F("      Time      ")); lcd.setCursor(0, 2); lcd.print(F("  setting   ")); lcd.setCursor(15, 1);           lcd.print("\1                ");                                                               delay(100); FlagMenu = 0;  break; }
   case 41: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("  setup  year   ")); lcd.setCursor(5, 1); lcd.print(Setyear);                                                                                           PrintMenuWrite(FlagMenu);                          delay(100);                break; }
   case 42: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("  setup  month  ")); lcd.setCursor(6, 1); lcd.print(Setmonth);                                                                                          PrintMenuWrite(FlagMenu);                          delay(100);                break; }
   case 43: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("   setup  day   ")); lcd.setCursor(6, 1); lcd.print(Setday);                                                                                            PrintMenuWrite(FlagMenu);                          delay(100);                break; }
   case 44: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("  setup  hour   ")); lcd.setCursor(6, 1); lcd.print(Sethour);                                                                                           PrintMenuWrite(FlagMenu);                          delay(100);                break; }
   case 45: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("  setup minute  ")); lcd.setCursor(6, 1); lcd.print(Setminute);                                                                                         PrintMenuWrite(FlagMenu);                          delay(100);                break; }
   case 46: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("  setup second  ")); lcd.setCursor(6, 1); lcd.print(Setsecond);                                                                                         PrintMenuWrite(FlagMenu);                          delay(100);                break; }
-  case 50: {  lcd.clear(); lcd.setCursor(0, 1); lcd.print(F("    Exstra      ")); lcd.setCursor(0, 2); lcd.print("     Setting      ");  lcd.setCursor(15, 1);           lcd.print("\1                ");                                                               delay(100); FlagMenu = 0;  break; }
+  case 50: {  lcd.clear(); lcd.setCursor(0, 1); lcd.print(F("    Exstra      ")); lcd.setCursor(0, 2); lcd.print("     Setting  ");  lcd.setCursor(15, 1);           lcd.print("\1                ");                                                               delay(100); FlagMenu = 0;  break; }
   case 51: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("      K p       ")); lcd.setCursor(0, 1); lcd.print(F("P = "));             lcd.print(consKp);                                                          PrintMenuWrite(FlagMenu);                          delay(100);                break; }
   case 52: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("      K i       ")); lcd.setCursor(0, 1); lcd.print(F("I = "));             lcd.print(consKi);                                                          PrintMenuWrite(FlagMenu);                          delay(100);                break; }
   case 53: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("      K d       ")); lcd.setCursor(0, 1); lcd.print(F("D = "));             lcd.print(consKd);                                                          PrintMenuWrite(FlagMenu);                          delay(100);                break; }
