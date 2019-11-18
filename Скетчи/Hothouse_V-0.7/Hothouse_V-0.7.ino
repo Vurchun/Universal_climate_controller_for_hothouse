@@ -34,10 +34,10 @@
 #define ssid  "Kyivstar_Alpha"  // Имя вайфай точки доступа
 #define pass  "R667fksX55fr" // Пароль от точки доступа
 
-#define mqtt_server "soldier.cloudmqtt.com" // Имя сервера MQTT
-#define  mqtt_port 12984 // Порт для подключения к серверу MQTT
-#define mqtt_user "vvhzufvr" // Логи от сервер
-#define mqtt_pass "yKN0yiP31mkt" // Пароль от сервера
+#define mqtt_server "m21.cloudmqtt.com" // Имя сервера MQTT
+#define  mqtt_port 19787 // Порт для подключения к серверу MQTT
+#define mqtt_user "udciowys" // Логи от сервер
+#define mqtt_pass "ZXBwDFYgAU_K" // Пароль от сервера
 #define mqtt_id "HotHouse" // Пароль от сервера
 
 #define host "api.openweathermap.org"
@@ -178,12 +178,22 @@ void setup()
   Wire.begin();
   Serial.begin(115200);             // Запускаем вывод данных на серийный порт 
   Wire.begin(SDA_PIN, SCL_PIN);
+  EEPROM.begin(512);
   
   ads.begin();
 
   rservo.attach(0);
   lservo.attach(2);
   myPID.SetMode(AUTOMATIC);
+  Serial.println();
+   
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+
+  lcd.setCursor(0, 0);  lcd.print("   Connecting to    ");
+  lcd.setCursor(0, 1);  lcd.print(ssid);
+  lcd.setCursor(0, 2);  lcd.print("       Pass         ");
+  lcd.setCursor(0, 3);  lcd.print(pass);
   Serial.println();
    
   Serial.print("Connecting to ");
@@ -449,13 +459,6 @@ void StartFan() // Открытие и закрытие окон и печать
   else if (FlagTempFan == 1 || FlagTimeFan == 1 && windspeed < 10 && winddeg > 315 && winddeg < 225) { lservo.write(0); lservo.write(90); lcd.setCursor(19, 2); lcd.print("\6"); }
   else { rservo.write(0); rservo.write(0); lcd.setCursor(19, 2); lcd.print(" "); }
 }
-void TypeHousePrint(){
-    switch(TypeHouse){
-    case 0:lcd.setCursor(8, 1);lcd.print("earthe");
-    case 1:lcd.setCursor(8, 1);lcd.print("hidro");
-    case 2:lcd.setCursor(8, 1);lcd.print("aer");
-    }
-}
 
 void BME280Read()                                                     // Чтение значений с датчика BME280
 { 
@@ -637,15 +640,27 @@ void WiFi_funk()
   if( voltage > 13.5 ) netpower = 1;
   else netpower = 0;
   delay(10);
-  int i = 0;
+  int i = 0,ReadySaved=0;
+  client.publish("Hothouse/ReadySaved",String(ReadySaved));           Serial.println("Tnow = ");        Serial.println(Tnow);delay(50);
+  
     while (i<10){
     lcd.setCursor(18, 3); lcd.print("\8");           //Отправка значений на сервер    
-    delay(100);i++;
+    delay(500);i++;
     }
-    while (!client.connect(MQTT::Connect(mqtt_id).set_auth(mqtt_user, mqtt_pass))) {
-    Serial.print(".");
-    delay(1000);
-  } 
+if (WiFi.status() == WL_CONNECTED) {
+//client object makes connection to server
+if (!client.connected()) {
+Serial.println("Connecting to MQTT server");
+//Authenticating the client object
+if (client.connect(MQTT::Connect("mqtt_client_name").set_auth(mqtt_user, mqtt_pass))) {
+Serial.println("Connected to MQTT server");
+} 
+else 
+{
+Serial.println("Could not connect to MQTT server");   
+}
+}
+}
   Serial.println("Connected to MQTT server");   
    
     lcd.setCursor(18, 3); lcd.print("\8");           //Отправка значений на сервер    
@@ -660,9 +675,14 @@ void WiFi_funk()
   client.publish("Hothouse/NetPower",String(netpower));   Serial.println("NetPower = ");    Serial.println(netpower);delay(50);
   client.publish("Hothouse/ConstP",String(consKp));       Serial.println("ConstP = "); Serial.println(consKp);delay(50);
   client.publish("Hothouse/ConstI",String(consKi));       Serial.println("ConstI = "); Serial.println(consKi);delay(50);
-  client.publish("Hothouse/ConstD",String(consKd));      Serial.println("ConstD = "); Serial.println(consKd);delay(250);
-  client.subscribe("Hothouse/NumBankSave");               client.set_callback(callback);// подписывааемся по топик с данными для банка загрузки 
-  
+  client.publish("Hothouse/ConstD",String(consKd));      Serial.println("ConstD = "); Serial.println(consKd);delay(50);
+  client.publish("Hothouse/maxTempFanStart",String(maxTempFanStart)); Serial.println("maxTempFanStart = "); Serial.println(maxTempFanStart);delay(50);
+  client.publish("Hothouse/TimeFanWork",String(TimeFanWork));  Serial.println("TimeFanWork = "); Serial.println(TimeFanWork);delay(50);
+  client.publish("Hothouse/TimeIntervalFanWork",String(TimeIntervalFanWork));  Serial.println("TimeIntervalFanWork = "); Serial.println(TimeIntervalFanWork);delay(50);
+ 
+  client.subscribe("Hothouse/NumBankSave");         client.set_callback(callback);// подписывааемся по топик с данными для банка загрузки 
+  client.subscribe("Hothouse/IfBankSave"); client.set_callback(callback);// подписывааемся по топик с данными для подтверждения перезагрузки  
+ 
      Serial.println("Finish");
      Serial.println("");
  
@@ -679,7 +699,6 @@ void WiFi_funk()
   client.subscribe("Hothouse/ControlHum"); client.set_callback(callback);// подписывааемся по топик с данными для заданной температуры
   client.subscribe("Hothouse/ControlTemp"); client.set_callback(callback);// подписывааемся по топик с данными для заданной влажности 
   client.subscribe("Hothouse/BankSave"); client.set_callback(callback);// подписывааемся по топик с данными для банка загрузки 
-  client.subscribe("Hothouse/IfBankSave"); client.set_callback(callback);// подписывааемся по топик с данными для подтверждения перезагрузки  
   client.subscribe("Hothouse/ConstP"); client.set_callback(callback);// подписывааемся по топик с данными для подтверждения перезагрузки  
   client.subscribe("Hothouse/ConstI"); client.set_callback(callback);// подписывааемся по топик с данными для подтверждения перезагрузки  
   client.subscribe("Hothouse/ConstD"); client.set_callback(callback);// подписывааемся по топик с данными для подтверждения перезагрузки  
@@ -714,8 +733,7 @@ jsonGet();
 
 
 void loop()
-{ 
-
+{
   PressingButtons = 0;
   currentMillis = millis();
    RTC.getTime(); 
@@ -724,8 +742,8 @@ void loop()
   {
     NOWyear = RTC.year; NOWmonth = RTC.month; NOWday = RTC.day; NOWhour = RTC.hour; NOWminute = RTC.minute; NOWsecond = RTC.second;
   }  
-  if (currentTime >= (loopTime))
-  {
+  if (currentTime >= loopTime)
+  {currentTime = loopTime - interval;
     PressKeyMenu();
     switch (PressingButtons) {
 case 1: {                                                                                                        // обработка события нажатия кнопки "МЕНЮ"
@@ -949,7 +967,7 @@ case 1: {                                                                       
   case 12: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("    Delta T     ")); lcd.setCursor(0, 1); lcd.print(F("\4t =   ")); lcd.print(deltaT);              lcd.print("\3                ");             PrintMenuWrite(FlagMenu);                         delay(100);                break; }
   case 13: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("   Humiditi     ")); lcd.setCursor(0, 1); lcd.print(F("H =     ")); lcd.print(Humiditi);            lcd.print("%                 ");             PrintMenuWrite(FlagMenu);                         delay(100);                break; }
   case 14: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("    Delta H     ")); lcd.setCursor(0, 1); lcd.print(F("\4h =   ")); lcd.print(deltaHumiditi);       lcd.print("%                 ");             PrintMenuWrite(FlagMenu);                         delay(100);                break; }
-  case 15: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("  Type HotHouse ")); lcd.setCursor(0, 1); lcd.print(F("Type =  ")); TypeHousePrint();               lcd.print("                  ");             PrintMenuWrite(FlagMenu);                         delay(100);                break; } 
+  case 15: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("  Type HotHouse ")); lcd.setCursor(0, 1); lcd.print(F("Type =  "));switch(TypeHouse){case 0:lcd.print("earthe");lcd.print("hidro");case 2:lcd.print("aer");}               lcd.print("                  ");             PrintMenuWrite(FlagMenu);                         delay(100);                break; } 
   case 20: {  lcd.clear(); lcd.setCursor(0, 1); lcd.print(F("  Save setting  ")); lcd.setCursor(0, 2); lcd.print(F("  to  EEPROM")); lcd.setCursor(15, 1);           lcd.print("\1                ");                                                               delay(100); FlagMenu = 0;  break; }
   case 21: {  lcd.clear(); lcd.setCursor(0, 0); lcd.print(F("Save setting to ")); lcd.setCursor(0, 1); lcd.print(F("bank    ")); lcd.print(bank); if (FlagMenu == 0) {      lcd.print(" press set"); delay(100); } else { SaveToEEPROM(bank);   lcd.print(" saving...");   delay(100); }              break; }
   case 30: {  lcd.clear(); lcd.setCursor(0, 1); lcd.print(F("  Load setting  ")); lcd.setCursor(0, 2); lcd.print(F("from  EEPROM")); lcd.setCursor(15, 1);           lcd.print("\1                ");                                                               delay(100); FlagMenu = 0;  break; }
