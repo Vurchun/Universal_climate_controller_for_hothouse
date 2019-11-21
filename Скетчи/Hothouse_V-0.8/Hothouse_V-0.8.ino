@@ -1,6 +1,5 @@
 #include <OneWire.h>
 #include <DS1307new.h>
-#include <GyverEncoder.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
 #include <Servo.h>
@@ -68,10 +67,9 @@ Adafruit_BME280 bme;
 
 Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 
-DS1307new RTC;
 // Must declare output stream before Adafruit_ESP8266 constructor; can be
 // a SoftwareSerial stream, or Serial/Serial1/etc. for UART.
-Encoder Enc(13, 15, 12, TYPE2);                     // CLK, DT, SW, тип (TYPE1 / TYPE2): TYPE1 одношаговый, TYPE2 двухшаговый. Если ваш энкодер работает странно, смените тип
+
 int BS, BL, BankSave;                                                 // Переменые для сохранения настроек 
 double Temp = 37.7, deltaT = 0.2;               // температура выращивания, дельта Т
 #define maxdeltaT 2                                        // максимальное значение дельтаТ для меню
@@ -268,9 +266,8 @@ void setup()
   Serial.begin(115200);             // Запускаем вывод данных на серийный порт 
   Wire.begin(SDA_PIN, SCL_PIN);
   EEPROM.begin(512);
-  
   ads.begin();
-
+ 
   rservo.attach(0);
   lservo.attach(2);
   myPID.SetMode(AUTOMATIC);
@@ -652,7 +649,7 @@ void WiFi_funk()
   else netpower = 0;
   delay(10);
   int i = 0,ReadySaved=0;
-  client.publish("Hothouse/ReadySaved",String(ReadySaved));           Serial.println("Tnow = ");        Serial.println(Tnow);delay(50);
+  client.publish("Hothouse/ReadySaved",String(ReadySaved));     
   
     while (i<10){
     lcd.setCursor(18, 3); lcd.print("\8");           //Отправка значений на сервер    
@@ -672,7 +669,7 @@ Serial.println("Could not connect to MQTT server");
 }
 }
 }
-  Serial.println("Connected to MQTT server");   
+
    
     lcd.setCursor(18, 3); lcd.print("\8");           //Отправка значений на сервер    
       Serial.println("Start");delay(50);
@@ -748,7 +745,9 @@ void loop()
   PressingButtons = 0;
   currentMillis = millis();
   RTC.getTime(); 
+
  
+
   if (FlagMenu == 0)
   {
     NOWyear = RTC.year; NOWmonth = RTC.month; NOWday = RTC.day; NOWhour = RTC.hour; NOWminute = RTC.minute; NOWsecond = RTC.second;
