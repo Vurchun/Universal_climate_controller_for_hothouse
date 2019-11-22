@@ -177,25 +177,27 @@ unsigned long int TimeIntervalFaningInterval = TimeIntervalFanWork * 60000;//д�
 void WriteBit(float Write)
 {
   
-  Bit[0] = abs(Write);
-  Bit[1] = abs((Write - Bit[0]) * 100);
-   }
-void WriteZero(float Write)
+  Bit[0] = floor(Write);
+  Bit[1] = floor((Write - Bit[0]) * 100);
+   } 
+void WriteZero(int Write)
 { int zero = 0;
-  while(Write<10)
-{Write/=10;zero++;}
-Bit[0] = Write;
-Bit[1] = zero;
+  while(Write>10){Write=Write/10;zero++;}
+Bit[0] = Write * 10; Bit[1] = zero - 1;
 }
 
-float ReadBit(float Read)
+float ReadBit()
 {
-  Read = Bit[0] + Bit[1] /100;
+  float Read = (Bit[0]*100 + Bit[1]);
+  Read = Read /100;Serial.print("Read = ");Serial.println(Read);
   return Read;
   }
-float ReadZero(float Read)
-{Read = Read*Bit[1];
-return Read;}
+float ReadZero(int Num ,int Step)
+{
+  float Read = Num * pow(10,Step);Serial.print("Read = ");Serial.println(Read);
+return Read;
+}
+
 void SaveToEEPROM(int BankSave)                                                         // запись данных во внутренний EEPROM 
 {
   WriteBit(Temp);
@@ -212,11 +214,12 @@ void SaveToEEPROM(int BankSave)                                                 
   WriteBit(maxTempFanStart);                                                                              
   BS = BankSave * 20 + 6;     EEPROM.write(BS, Bit[0]);           delay(100);    // запись  температуры продувки * 100 в ячейку "7" банка "bank"
   BS = BankSave * 20 + 7;     EEPROM.write(BS, Bit[1]);           delay(100);
-  WriteBit(TimeFanWork);
+ 
+  WriteZero(TimeFanWork);
   BS = BankSave * 20 + 8;     EEPROM.write(BS, Bit[1]);           delay(100);    // запись higtBit температуры продувки * 100 в ячейку "8" банка "bank"
   BS = BankSave * 20 + 9;     EEPROM.write(BS, Bit[1]);           delay(100);   
   
-  WriteBit(TimeIntervalFanWork);
+  WriteZero(TimeIntervalFanWork);
   BS = BankSave * 20 + 10;     EEPROM.write(BS, Bit[0]);           delay(100);    // запись  времени вентиляции теплицы от СО2 в ячейку "9" банка "bank"
   BS = BankSave * 20 + 11;     EEPROM.write(BS, Bit[1]);           delay(100);    // запись higtBit температуры продувки * 100 в ячейку "8" банка "bank"
   
@@ -232,22 +235,27 @@ void LoadFromEEPROM(int BankLoad)                                               
 {
   BL = BankLoad * 20 + 0;     Bit[0] = EEPROM.read(BL);            delay(100);    // чтение  температуры выращивания *100 из ячейки "0"
   BL = BankLoad * 20 + 1;     Bit[1] = EEPROM.read(BL);            delay(100);    // чтение higtBit температуры выращивания *100 из ячейки "1"
- Temp = ReadBit(Bit[0]);
+ Temp = ReadBit();
+ 
   BL = BankLoad * 20 + 2;     Bit[0] = EEPROM.read(BL);            delay(100);    // чтение lowBit дельтаТ температуры выращивания *100 из ячейки "2"
   BL = BankLoad * 20 + 3;     Bit[1] = EEPROM.read(BL);            delay(100);    // чтение higtBit дельтаТ температуры выращивания *100 из ячейки "3"
- deltaT = ReadBit(Bit[0]);
+ deltaT = ReadBit();
+ 
   BL = BankLoad * 20 + 4;     Humiditi = EEPROM.read(BL);           delay(100);    // чтение дельты влажности выращивания из ячейки "4"
   BL = BankLoad * 20 + 5;     deltaHumiditi = EEPROM.read(BL);      delay(100);    // чтение дельты влажности выращивания из ячейки "5"
                                                                                           
   BL = BankLoad * 20 + 7;     Bit[0] = EEPROM.read(BL);            delay(100);    // чтение lowBit температуры продувки *100 из ячейки "7"
   BL = BankLoad * 20 + 8;     Bit[1] = EEPROM.read(BL);            delay(100);    // чтение higtBit температуры продувки *100 из ячейки "8"
- maxTempFanStart = ReadBit(Bit[0]);
+ maxTempFanStart = ReadBit();
+ 
   BL = BankLoad * 20 + 9;     Bit[0] = EEPROM.read(BL);            delay(100);     // чтение lowBit времени вентиляции теплицы от СО2 из ячейки "9"
   BL = BankLoad * 20 + 10;    Bit[1] = EEPROM.read(BL);            delay(100);     // чтение higtBit времени вентиляции теплицы от СО2 из ячейки "10"
- TimeFanWork =  ReadBit(Bit[0]);
+ TimeFanWork =  ReadZero(Bit[0],Bit[1]);
+ 
   BL = BankLoad * 20  + 11;   Bit[0] = EEPROM.read(BL);            delay(100);      // чтение lowBit интервала между вентиляциями теплицы от СО2 из ячейки "11"
   BL = BankLoad * 20 + 12;    Bit[1] = EEPROM.read(BL);            delay(100);      // чтение higtBit интервала между вентиляциями теплицы от СО2 из ячейки "12"
- TimeIntervalFanWork = ReadBit(Bit[0]);
+ TimeIntervalFanWork = ReadZero(Bit[0],Bit[1]);
+ 
   BL = BankLoad * 20 + 13;    FanWorkFlag = EEPROM.read(BL);        delay(100);     // чтение флага активностивентиляциями теплицы от СО2 из ячейки "13"
   BL = BankLoad * 20 + 14;    HumGround = EEPROM.read(BL);          delay(100);     // чтение Нужной вдоажности почвы в ячейку "14" банка "bank"
  
@@ -255,14 +263,10 @@ void LoadFromEEPROM(int BankLoad)                                               
                               consKi = EEPROM.read(132);            delay(100);    //чтение Интегрального коефициента                 
                               consKd = EEPROM.read(133);            delay(100);    //чтение Дефиринциального коефициента 
                               TypeHouse = EEPROM.read(135);         delay(100);    //чтение Типа теплицы 
- 
-  TimeFaningInterval = TimeFanWork * 1000;                 //длительность работы вентилятора при продувке теплицы от СО2 
-  TimeIntervalFaningInterval = TimeIntervalFanWork * 60000;//длительность интервала между продувками теплицы от СО2
-}
+                              }
 void setup()
 {
   lcd.begin(20, 4);
-  Wire.begin();
   Serial.begin(115200);             // Запускаем вывод данных на серийный порт 
   Wire.begin(SDA_PIN, SCL_PIN);
   EEPROM.begin(512);
@@ -451,12 +455,12 @@ void StartFan() // Открытие и закрытие окон и печать
   if (FanWorkFlag == 1) {
     switch (FlagTimeFan) {
     case 1: {
-      if ((currentMillis - TimeFaning) > TimeFaningInterval) {
+      if ((currentMillis - TimeIntervalFaning) > TimeFaning) {
         FlagTimeFan = 0;
         TimeIntervalFaning = currentMillis;
       } break; }
     case 0: {
-      if ((currentMillis - TimeIntervalFaning) > TimeIntervalFaningInterval) {
+      if ((currentMillis - TimeFaning) > TimeFaningInterval) {
         FlagTimeFan = 1;
         TimeFaning = currentMillis;
       } break; }
@@ -746,7 +750,19 @@ void loop()
   currentMillis = millis();
   RTC.getTime(); 
 
- 
+ Temp = 20;
+ deltaT = 0.1;
+ Humiditi =80; // чтение дельты влажности выращивания из ячейки "4"
+ deltaHumiditi = 1; maxTempFanStart = 30; TimeFanWork = 60; // чтение higtByte интервала между вентиляциями теплицы от СО2 из ячейки "12"
+ TimeIntervalFanWork = 120;
+ FanWorkFlag = 0; // чтение флага активностивентиляциями теплицы от СО2 из ячейки "13"
+ consKp = 1; //чтение Пропорционального коефициента 
+ consKi = 1; //чтение Интегрального коефициента 
+ consKd = 1; //чтение Дефиринциального коефициента 
+ HumGround = 80; //чтение Нужной вдоажности почвы
+ TypeHouse = 1; //чтение Типа теплицы 
+ SaveToEEPROM(0);SaveToEEPROM(1);SaveToEEPROM(2);SaveToEEPROM(3);SaveToEEPROM(4);
+                LoadFromEEPROM(0);
 
   if (FlagMenu == 0)
   {
